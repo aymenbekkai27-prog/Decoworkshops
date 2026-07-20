@@ -1,12 +1,9 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
-import type { AppData, Job, Worker, Material, Role, JobBid } from '../types';
+import type { AppData, Job, Worker, Material, JobBid } from '../types';
 import { loadData, saveData, resetData, generateTrackingCode } from '../lib/storage';
 
 interface AppContextValue {
   data: AppData;
-  role: Role | null;
-  setRole: (r: Role) => void;
-  exitPortal: () => void;
   addJob: (job: Omit<Job, 'id' | 'trackingCode' | 'status' | 'createdAt' | 'bids'>) => Job;
   updateJob: (id: string, patch: Partial<Job>) => void;
   getJob: (id: string) => Job | undefined;
@@ -28,9 +25,6 @@ const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<AppData>(() => loadData());
-  const [role, setRole] = useState<Role | null>(null);
-
-  const exitPortal = useCallback(() => setRole(null), []);
 
   const addJob: AppContextValue['addJob'] = useCallback((job) => {
     const newJob: Job = {
@@ -163,7 +157,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value: AppContextValue = {
-    data, role, setRole, exitPortal,
+    data,
     addJob, updateJob, getJob, getJobByTracking,
     addBid, assignWorker, addWorker,
     addMaterial, updateMaterial, deleteMaterial, toggleBoxOpened,
