@@ -23,6 +23,7 @@ export interface InspectionData {
   depositReceived: boolean;
   inspectedAt: string;
   inspectedBy: string;
+  siteVisitPhotos?: string[];
 }
 
 export interface ExecutionData {
@@ -31,6 +32,7 @@ export interface ExecutionData {
   returnMethod: ReturnMethod;
   finalPaymentReceived: boolean;
   completedAt: string;
+  finalMeasurementsConfirmed?: boolean;
 }
 
 export interface Job {
