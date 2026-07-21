@@ -75,6 +75,7 @@ export function CustomerPortal() {
       setForm({ clientName: '', clientPhone: '', propertyType: 'home', city: CITIES[0], estimatedArea: '' });
       showToast('تم تسجيل طلبك بنجاح', 'success');
     } catch (e) {
+      console.error('[CustomerPortal] addJob failed:', e);
       showToast(e instanceof Error ? e.message : 'حدث خطأ أثناء التسجيل', 'error');
     } finally {
       setSubmitting(false);
@@ -88,7 +89,8 @@ export function CustomerPortal() {
     try {
       const job = await getJobByTracking(trackingInput.trim());
       setTrackingResult(job ?? null);
-    } catch {
+    } catch (e) {
+      console.error('[CustomerPortal] getJobByTracking failed:', e);
       setTrackingResult(null);
     } finally {
       setTrackingBusy(false);

@@ -4,6 +4,11 @@ import type {
   PropertyType, JobComplexity, JobStatus, ReturnMethod,
 } from '../types';
 
+// Centralized error logger so every Supabase failure is visible in the console.
+function logError(context: string, error: unknown): void {
+  console.error(`[storage] ${context}:`, error);
+}
+
 // ============ Row types (from Supabase) ============
 interface ProjectRow {
   id: string;
@@ -160,10 +165,10 @@ export async function loadAppData(): Promise<AppData> {
     supabase.from('app_settings').select('admin_profit_split').limit(1).maybeSingle(),
   ]);
 
-  if (projectsRes.error) throw projectsRes.error;
-  if (workersRes.error) throw workersRes.error;
-  if (materialsRes.error) throw materialsRes.error;
-  if (settingsRes.error) throw settingsRes.error;
+  if (projectsRes.error) { logError('loadAppData.projects', projectsRes.error); throw projectsRes.error; }
+  if (workersRes.error) { logError('loadAppData.workers', workersRes.error); throw workersRes.error; }
+  if (materialsRes.error) { logError('loadAppData.materials', materialsRes.error); throw materialsRes.error; }
+  if (settingsRes.error) { logError('loadAppData.settings', settingsRes.error); throw settingsRes.error; }
 
   return {
     jobs: (projectsRes.data as ProjectRow[]).map(mapJob),
@@ -201,20 +206,33 @@ export async function createProject(input: {
   city: string; estimatedArea: number;
 }): Promise<Job> {
   const trackingCode = generateTrackingCode();
+  const insertPayload = {
+    tracking_code: trackingCode,
+    client_name: input.clientName,
+    client_phone: input.clientPhone,
+    property_type: input.propertyType,
+    city: input.city,
+    estimated_area: input.estimatedArea,
+    status: 'new',
+  };
+  console.log('[storage] createProject inserting:', insertPayload);
+
+  // Insert with a plain .select() (no nested relations) — nested selects
+  // right after an INSERT can fail in postgREST's schema cache.
   const { data, error } = await supabase
     .from('projects')
-    .insert({
-      tracking_code: trackingCode,
-      client_name: input.clientName,
-      client_phone: input.clientPhone,
-      property_type: input.propertyType,
-      city: input.city,
-      estimated_area: input.estimatedArea,
-      status: 'new',
-    })
-    .select('*, job_bids(*), job_photos(*), job_measurements(*)')
+    .insert(insertPayload)
+    .select('*')
     .single();
-  if (error) throw error;
+
+  if (error) {
+    logError('createProject.insert', error);
+    throw error;
+  }
+  console.log('[storage] createProject success:', data);
+
+  // A freshly-created project has no bids/photos/measurements yet, so
+  // mapJob with empty arrays is correct.
   return mapJob(data as ProjectRow);
 }
 
@@ -227,7 +245,7 @@ export async function updateProject(id: string, patch: Partial<Job>): Promise<vo
   if (patch.ledgerLocked !== undefined) update.ledger_locked = patch.ledgerLocked;
   if (Object.keys(update).length === 0) return;
   const { error } = await supabase.from('projects').update(update).eq('id', id);
-  if (error) throw error;
+  if (error) { logError('updateProject', error); throw error; }
 }
 
 export async function getProjectByTracking(code: string): Promise<Job | null> {
@@ -236,7 +254,7 @@ export async function getProjectByTracking(code: string): Promise<Job | null> {
     .select('*, job_bids(*), job_photos(*), job_measurements(*)')
     .ilike('tracking_code', code)
     .maybeSingle();
-  if (error) throw error;
+  if (error) { logError('getProjectByTracking', error); throw error; }
   return data ? mapJob(data as ProjectRow) : null;
 }
 
@@ -253,7 +271,7 @@ export async function addBid(jobId: string, bid: {
     proposed_start: bid.proposedStart || null,
     note: bid.note ?? null,
   });
-  if (error) throw error;
+  if (error) { logError('addBid', error); throw error; }
 }
 
 // ============ Workers ============
@@ -264,7 +282,7 @@ export async function createWorker(input: {
     name: input.name, phone: input.phone, city: input.city,
     rating: 5.0, jobs_completed: 0,
   });
-  if (error) throw error;
+  if (error) { logError('createWorker', error); throw error; }
 }
 
 // ============ Materials ============
@@ -275,7 +293,7 @@ export async function createMaterial(input: Omit<Material, 'id'>): Promise<void>
     box_opened: input.boxOpened, box_opened_for_job_id: input.boxOpenedForJobId ?? null,
     consumption_per_sqm: input.consumptionPerSqm ?? null,
   });
-  if (error) throw error;
+  if (error) { logError('createMaterial', error); throw error; }
 }
 
 export async function updateMaterial(id: string, patch: Partial<Material>): Promise<void> {
@@ -292,12 +310,12 @@ export async function updateMaterial(id: string, patch: Partial<Material>): Prom
   if (patch.consumptionPerSqm !== undefined) update.consumption_per_sqm = patch.consumptionPerSqm;
   if (Object.keys(update).length === 0) return;
   const { error } = await supabase.from('materials').update(update).eq('id', id);
-  if (error) throw error;
+  if (error) { logError('updateMaterial', error); throw error; }
 }
 
 export async function deleteMaterial(id: string): Promise<void> {
   const { error } = await supabase.from('materials').delete().eq('id', id);
-  if (error) throw error;
+  if (error) { logError('deleteMaterial', error); throw error; }
 }
 
 // ============ Settings ============
@@ -306,7 +324,7 @@ export async function setAdminProfitSplit(value: number): Promise<void> {
     .from('app_settings')
     .update({ admin_profit_split: value })
     .eq('id', '00000000-0000-0000-0000-000000000001');
-  if (error) throw error;
+  if (error) { logError('setAdminProfitSplit', error); throw error; }
 }
 
 // ============ Photos (Supabase Storage) ============
@@ -318,12 +336,12 @@ export async function uploadPhoto(
   const { error: upErr } = await supabase.storage
     .from(JOB_PHOTOS_BUCKET)
     .upload(path, file, { contentType: file.type, upsert: false });
-  if (upErr) throw upErr;
+  if (upErr) { logError('uploadPhoto.storage', upErr); throw upErr; }
   const { data: pub } = supabase.storage.from(JOB_PHOTOS_BUCKET).getPublicUrl(path);
   const { error: dbErr } = await supabase.from('job_photos').insert({
     project_id: projectId, kind, storage_path: path, url: pub.publicUrl,
   });
-  if (dbErr) throw dbErr;
+  if (dbErr) { logError('uploadPhoto.db', dbErr); throw dbErr; }
   return pub.publicUrl;
 }
 
@@ -374,10 +392,10 @@ export async function saveInspection(
   };
   if (existing) {
     const { error } = await supabase.from('job_measurements').update(payload).eq('id', existing.id);
-    if (error) throw error;
+    if (error) { logError('saveInspection.update', error); throw error; }
   } else {
     const { error } = await supabase.from('job_measurements').insert(payload);
-    if (error) throw error;
+    if (error) { logError('saveInspection.insert', error); throw error; }
   }
 }
 
@@ -400,9 +418,9 @@ export async function saveExecution(
   };
   if (existing) {
     const { error } = await supabase.from('job_measurements').update(payload).eq('id', existing.id);
-    if (error) throw error;
+    if (error) { logError('saveExecution.update', error); throw error; }
   } else {
     const { error } = await supabase.from('job_measurements').insert(payload);
-    if (error) throw error;
+    if (error) { logError('saveExecution.insert', error); throw error; }
   }
 }

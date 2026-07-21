@@ -38,6 +38,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setData(next);
       setError(null);
     } catch (e) {
+      console.error('[AppContext] loadAppData failed:', e);
       setError(e instanceof Error ? e.message : 'Failed to load data');
     } finally {
       setLoading(false);
@@ -59,7 +60,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => refresh())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'materials' }, () => refresh())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, () => refresh())
-      .subscribe();
+      .subscribe((status, err) => {
+        if (err) console.error('[AppContext] realtime error:', err);
+        if (status === 'CHANNEL_ERROR') console.error('[AppContext] realtime channel error');
+      });
     return () => { supabase.removeChannel(channel); };
   }, [refresh]);
 
