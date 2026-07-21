@@ -1,167 +1,135 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
-import type { AppData, Job, Worker, Material, JobBid } from '../types';
-import { loadData, saveData, resetData, generateTrackingCode } from '../lib/storage';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import type { AppData, Job, Worker, Material, InspectionData, ExecutionData, PropertyType } from '../types';
+import * as db from '../lib/storage';
+import { supabase } from '../lib/supabase';
 
 interface AppContextValue {
   data: AppData;
-  addJob: (job: Omit<Job, 'id' | 'trackingCode' | 'status' | 'createdAt' | 'bids'>) => Job;
-  updateJob: (id: string, patch: Partial<Job>) => void;
-  getJob: (id: string) => Job | undefined;
-  getJobByTracking: (code: string) => Job | undefined;
-  addBid: (jobId: string, bid: Omit<JobBid, 'id' | 'createdAt'>) => void;
-  assignWorker: (jobId: string, workerId: string, workerName: string) => void;
-  addWorker: (worker: Omit<Worker, 'id' | 'rating' | 'jobsCompleted'>) => void;
-  addMaterial: (m: Omit<Material, 'id'>) => void;
-  updateMaterial: (id: string, patch: Partial<Material>) => void;
-  deleteMaterial: (id: string) => void;
-  toggleBoxOpened: (materialId: string, jobId?: string) => void;
-  setAdminProfitSplit: (v: number) => void;
-  resetAll: () => void;
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+  addJob: (job: { clientName: string; clientPhone: string; propertyType: PropertyType; city: string; estimatedArea: number }) => Promise<Job>;
+  updateJob: (id: string, patch: Partial<Job>) => Promise<void>;
+  getJobByTracking: (code: string) => Promise<Job | null>;
+  addBid: (jobId: string, bid: { workerId: string; workerName: string; earliestInspection: string; proposedStart: string; note?: string }) => Promise<void>;
+  assignWorker: (jobId: string, workerId: string, workerName: string) => Promise<void>;
+  saveInspection: (jobId: string, data: InspectionData) => Promise<void>;
+  saveExecution: (jobId: string, data: ExecutionData) => Promise<void>;
+  addWorker: (worker: Omit<Worker, 'id' | 'rating' | 'jobsCompleted'>) => Promise<void>;
+  addMaterial: (m: Omit<Material, 'id'>) => Promise<void>;
+  updateMaterial: (id: string, patch: Partial<Material>) => Promise<void>;
+  deleteMaterial: (id: string) => Promise<void>;
+  toggleBoxOpened: (materialId: string, jobId?: string) => Promise<void>;
+  setAdminProfitSplit: (v: number) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
-const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+const EMPTY_DATA: AppData = { jobs: [], workers: [], materials: [], adminProfitSplit: 60 };
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<AppData>(() => loadData());
+  const [data, setData] = useState<AppData>(EMPTY_DATA);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const addJob: AppContextValue['addJob'] = useCallback((job) => {
-    const newJob: Job = {
-      ...job,
-      id: uid(),
-      trackingCode: generateTrackingCode(),
-      status: 'new',
-      createdAt: new Date().toISOString(),
-      bids: [],
-    };
-    setData((prev) => {
-      const next = { ...prev, jobs: [newJob, ...prev.jobs] };
-      saveData(next);
-      return next;
-    });
-    return newJob;
+  const refresh = useCallback(async () => {
+    try {
+      const next = await db.loadAppData();
+      setData(next);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const updateJob: AppContextValue['updateJob'] = useCallback((id, patch) => {
-    setData((prev) => {
-      const next = {
-        ...prev,
-        jobs: prev.jobs.map((j) => (j.id === id ? { ...j, ...patch } : j)),
-      };
-      saveData(next);
-      return next;
-    });
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Realtime: refetch on any change to operational tables.
+  useEffect(() => {
+    const channel = supabase
+      .channel('app-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => refresh())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_bids' }, () => refresh())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_photos' }, () => refresh())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_measurements' }, () => refresh())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => refresh())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'materials' }, () => refresh())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, () => refresh())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [refresh]);
+
+  const addJob = useCallback<AppContextValue['addJob']>(async (job) => {
+    return db.createProject(job);
   }, []);
 
-  const getJob = useCallback((id: string) => data.jobs.find((j) => j.id === id), [data.jobs]);
-  const getJobByTracking = useCallback(
-    (code: string) => data.jobs.find((j) => j.trackingCode.toUpperCase() === code.toUpperCase()),
-    [data.jobs],
-  );
-
-  const addBid: AppContextValue['addBid'] = useCallback((jobId, bid) => {
-    setData((prev) => {
-      const next = {
-        ...prev,
-        jobs: prev.jobs.map((j) =>
-          j.id === jobId
-            ? { ...j, bids: [...j.bids, { ...bid, id: uid(), createdAt: new Date().toISOString() }] }
-            : j,
-        ),
-      };
-      saveData(next);
-      return next;
-    });
+  const updateJob = useCallback<AppContextValue['updateJob']>(async (id, patch) => {
+    await db.updateProject(id, patch);
   }, []);
 
-  const assignWorker: AppContextValue['assignWorker'] = useCallback((jobId, workerId, workerName) => {
-    setData((prev) => {
-      const next = {
-        ...prev,
-        jobs: prev.jobs.map((j) =>
-          j.id === jobId
-            ? { ...j, assignedWorkerId: workerId, assignedWorkerName: workerName, status: 'inspecting' as const }
-            : j,
-        ),
-      };
-      saveData(next);
-      return next;
+  const getJobByTracking = useCallback<AppContextValue['getJobByTracking']>(async (code) => {
+    return db.getProjectByTracking(code);
+  }, []);
+
+  const addBid = useCallback<AppContextValue['addBid']>(async (jobId, bid) => {
+    await db.addBid(jobId, bid);
+  }, []);
+
+  const assignWorker = useCallback<AppContextValue['assignWorker']>(async (jobId, workerId, workerName) => {
+    await db.updateProject(jobId, {
+      assignedWorkerId: workerId,
+      assignedWorkerName: workerName,
+      status: 'inspecting',
     });
   }, []);
 
-  const addWorker: AppContextValue['addWorker'] = useCallback((worker) => {
-    setData((prev) => {
-      const next = {
-        ...prev,
-        workers: [...prev.workers, { ...worker, id: uid(), rating: 5.0, jobsCompleted: 0 }],
-      };
-      saveData(next);
-      return next;
-    });
+  const saveInspection = useCallback<AppContextValue['saveInspection']>(async (jobId, d) => {
+    await db.saveInspection(jobId, d);
   }, []);
 
-  const addMaterial: AppContextValue['addMaterial'] = useCallback((m) => {
-    setData((prev) => {
-      const next = { ...prev, materials: [...prev.materials, { ...m, id: uid() }] };
-      saveData(next);
-      return next;
-    });
+  const saveExecution = useCallback<AppContextValue['saveExecution']>(async (jobId, d) => {
+    await db.saveExecution(jobId, d);
   }, []);
 
-  const updateMaterial: AppContextValue['updateMaterial'] = useCallback((id, patch) => {
-    setData((prev) => {
-      const next = {
-        ...prev,
-        materials: prev.materials.map((m) => (m.id === id ? { ...m, ...patch } : m)),
-      };
-      saveData(next);
-      return next;
-    });
+  const addWorker = useCallback<AppContextValue['addWorker']>(async (worker) => {
+    await db.createWorker(worker);
   }, []);
 
-  const deleteMaterial: AppContextValue['deleteMaterial'] = useCallback((id) => {
-    setData((prev) => {
-      const next = { ...prev, materials: prev.materials.filter((m) => m.id !== id) };
-      saveData(next);
-      return next;
-    });
+  const addMaterial = useCallback<AppContextValue['addMaterial']>(async (m) => {
+    await db.createMaterial(m);
   }, []);
 
-  const toggleBoxOpened: AppContextValue['toggleBoxOpened'] = useCallback((materialId, jobId) => {
-    setData((prev) => {
-      const next = {
-        ...prev,
-        materials: prev.materials.map((m) =>
-          m.id === materialId
-            ? { ...m, boxOpened: !m.boxOpened, boxOpenedForJobId: !m.boxOpened ? jobId : undefined }
-            : m,
-        ),
-      };
-      saveData(next);
-      return next;
-    });
+  const updateMaterial = useCallback<AppContextValue['updateMaterial']>(async (id, patch) => {
+    await db.updateMaterial(id, patch);
   }, []);
 
-  const setAdminProfitSplit: AppContextValue['setAdminProfitSplit'] = useCallback((v) => {
-    setData((prev) => {
-      const next = { ...prev, adminProfitSplit: v };
-      saveData(next);
-      return next;
-    });
+  const deleteMaterial = useCallback<AppContextValue['deleteMaterial']>(async (id) => {
+    await db.deleteMaterial(id);
   }, []);
 
-  const resetAll: AppContextValue['resetAll'] = useCallback(() => {
-    const d = resetData();
-    setData(d);
+  const toggleBoxOpened = useCallback<AppContextValue['toggleBoxOpened']>(async (materialId) => {
+    const mat = data.materials.find((m) => m.id === materialId);
+    if (!mat) return;
+    await db.updateMaterial(materialId, {
+      boxOpened: !mat.boxOpened,
+      boxOpenedForJobId: !mat.boxOpened ? materialId : undefined,
+    });
+  }, [data.materials]);
+
+  const setAdminProfitSplit = useCallback<AppContextValue['setAdminProfitSplit']>(async (v) => {
+    await db.setAdminProfitSplit(v);
   }, []);
 
   const value: AppContextValue = {
-    data,
-    addJob, updateJob, getJob, getJobByTracking,
-    addBid, assignWorker, addWorker,
+    data, loading, error, refresh,
+    addJob, updateJob, getJobByTracking, addBid, assignWorker,
+    saveInspection, saveExecution, addWorker,
     addMaterial, updateMaterial, deleteMaterial, toggleBoxOpened,
-    setAdminProfitSplit, resetAll,
+    setAdminProfitSplit,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

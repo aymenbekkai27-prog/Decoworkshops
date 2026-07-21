@@ -1,8 +1,5 @@
 import { useState } from 'react';
-import {
-  Package, Plus, Edit3, Trash2, Layers, Palette, Lightbulb, Wrench,
-  Box, CheckCircle2, AlertTriangle, RotateCcw,
-} from 'lucide-react';
+import { Package, Plus, CreditCard as Edit3, Trash2, Layers, Palette, Lightbulb, Wrench, Box, CheckCircle2, AlertTriangle, RotateCcw } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useToast } from './ui/Toast';
 import { Modal } from './ui/Modal';
@@ -16,7 +13,7 @@ const CATEGORY_ICONS: Record<MaterialCategory, typeof Layers> = {
 };
 
 export function MaterialsInventory() {
-  const { data, addMaterial, updateMaterial, deleteMaterial, toggleBoxOpened, resetAll } = useApp();
+  const { data, addMaterial, updateMaterial, deleteMaterial, toggleBoxOpened } = useApp();
   const showToast = useToast();
   const [addOpen, setAddOpen] = useState(false);
   const [editMaterial, setEditMaterial] = useState<Material | null>(null);
@@ -88,21 +85,37 @@ export function MaterialsInventory() {
 
       {addOpen && (
         <MaterialFormModal onClose={() => setAddOpen(false)}
-          onSubmit={(d) => { addMaterial(d); showToast('تمت إضافة المادة بنجاح', 'success'); setAddOpen(false); }} />
+          onSubmit={async (d) => {
+            try {
+              await addMaterial(d);
+              showToast('تمت إضافة المادة بنجاح', 'success');
+              setAddOpen(false);
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : 'فشلت الإضافة', 'error');
+            }
+          }} />
       )}
       {editMaterial && (
         <MaterialFormModal material={editMaterial} onClose={() => setEditMaterial(null)}
-          onSubmit={(d) => { updateMaterial(editMaterial.id, d); showToast('تم تحديث المادة', 'success'); setEditMaterial(null); }} />
+          onSubmit={async (d) => {
+            try {
+              await updateMaterial(editMaterial.id, d);
+              showToast('تم تحديث المادة', 'success');
+              setEditMaterial(null);
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : 'فشل التحديث', 'error');
+            }
+          }} />
       )}
 
       <ConfirmDialog open={!!deleteId} title="حذف المادة" danger
         message="هل أنت متأكد من حذف هذه المادة من المخزون؟ لا يمكن التراجع." confirmLabel="حذف"
-        onConfirm={() => { if (deleteId) deleteMaterial(deleteId); setDeleteId(null); }}
+        onConfirm={() => { if (deleteId) { deleteMaterial(deleteId); } setDeleteId(null); }}
         onCancel={() => setDeleteId(null)} />
 
       <ConfirmDialog open={resetConfirm} title="إعادة تعيين البيانات" danger
-        message="سيتم حذف جميع البيانات وإعادة تعيين النظام إلى الحالة الأولية. لا يمكن التراجع." confirmLabel="إعادة التعيين"
-        onConfirm={() => { resetAll(); setResetConfirm(false); showToast('تمت إعادة تعيين البيانات', 'info'); }}
+        message="هذه الميزة غير متاحة بعد ربط قاعدة البيانات." confirmLabel="إغلاق"
+        onConfirm={() => setResetConfirm(false)}
         onCancel={() => setResetConfirm(false)} />
     </div>
   );

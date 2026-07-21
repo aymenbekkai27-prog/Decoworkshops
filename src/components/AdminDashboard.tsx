@@ -1,9 +1,5 @@
 import { useState } from 'react';
-import {
-  LayoutGrid, Package, Calculator, Phone, CheckCircle2, Award, Clock,
-  Calendar, MapPin, Home, Factory, Store, Edit3, TrendingUp,
-  Wallet, Receipt, Lock, AlertTriangle,
-} from 'lucide-react';
+import { LayoutGrid, Package, Calculator, Phone, CheckCircle2, Award, Clock, Calendar, MapPin, Home, Factory, Store, CreditCard as Edit3, TrendingUp, Wallet, Receipt, Lock, AlertTriangle } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useToast } from './ui/Toast';
 import { Modal } from './ui/Modal';
@@ -133,26 +129,38 @@ function KanbanBoard() {
 
       {bidJob && (
         <BidComparisonModal job={bidJob} onClose={() => setBidJob(null)}
-          onAssign={(workerId, workerName) => {
-            assignWorker(bidJob.id, workerId, workerName);
-            showToast('تم تعيين العامل بنجاح', 'success');
-            setBidJob(null);
+          onAssign={async (workerId, workerName) => {
+            try {
+              await assignWorker(bidJob.id, workerId, workerName);
+              showToast('تم تعيين العامل بنجاح', 'success');
+              setBidJob(null);
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : 'فشل التعيين', 'error');
+            }
           }} />
       )}
       {pricingJob && (
         <PricingEngineModal job={pricingJob} onClose={() => setPricingJob(null)}
-          onSave={(patch) => {
-            updateJob(pricingJob.id, patch);
-            showToast('تم حفظ التعديلات', 'success');
-            setPricingJob(null);
+          onSave={async (patch) => {
+            try {
+              await updateJob(pricingJob.id, patch);
+              showToast('تم حفظ التعديلات', 'success');
+              setPricingJob(null);
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : 'فشل الحفظ', 'error');
+            }
           }} />
       )}
       {ledgerJob && (
         <LedgerModal job={ledgerJob} onClose={() => setLedgerJob(null)}
-          onLock={() => {
-            updateJob(ledgerJob.id, { ledgerLocked: true });
-            showToast('تمت تصفية وإغلاق الحسابات نهائياً', 'success');
-            setLedgerJob(null);
+          onLock={async () => {
+            try {
+              await updateJob(ledgerJob.id, { ledgerLocked: true });
+              showToast('تمت تصفية وإغلاق الحسابات نهائياً', 'success');
+              setLedgerJob(null);
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : 'فشلت التصفية', 'error');
+            }
           }} />
       )}
     </>
@@ -361,7 +369,7 @@ function LedgerModal({ job, onClose, onLock }: {
           <span>تقسيم الربح: الإدارة / الشريك المنصة</span>
           <span className="text-navy-700 font-bold">{data.adminProfitSplit}% / {100 - data.adminProfitSplit}%</span>
         </label>
-        <input type="range" min="0" max="100" value={data.adminProfitSplit} onChange={(e) => setAdminProfitSplit(Number(e.target.value))} className="w-full accent-navy-600" />
+        <input type="range" min="0" max="100" value={data.adminProfitSplit} onChange={(e) => { setAdminProfitSplit(Number(e.target.value)); }} className="w-full accent-navy-600" />
         <div className="flex justify-between text-sm mt-2">
           <span className="text-navy-700 font-semibold">الإدارة: {formatDZD(settlement.adminShare)}</span>
           <span className="text-slate-600 font-semibold">الشريك: {formatDZD(settlement.partnerShare)}</span>

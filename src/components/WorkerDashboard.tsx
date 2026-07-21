@@ -2,22 +2,27 @@ import { useState } from 'react';
 import {
   ClipboardList, MapPin, Home, Factory, Store, Ruler, Calendar, Clock,
   CheckCircle2, Camera, Truck, Bike, Upload, Star, Lightbulb, Gauge,
-  Lock, ArrowLeft, Search, User, Pencil, ImageOff, ShieldCheck,
+  Lock, ArrowLeft, Search, User, Pencil, ImageOff, ShieldCheck, Loader2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../lib/auth';
 import { useToast } from './ui/Toast';
 import { Modal } from './ui/Modal';
 import { StatusPill } from './ui/StatusPill';
-import type { Job, PropertyType, JobComplexity, ReturnMethod, InspectionData, ExecutionData } from '../types';
+import { replaceProjectPhotos } from '../lib/storage';
+import type { Job, PropertyType, JobComplexity, ReturnMethod } from '../types';
 import { PROPERTY_TYPE_LABELS, JOB_COMPLEXITY_LABELS } from '../types';
 
 const PROPERTY_ICONS: Record<PropertyType, typeof Home> = { home: Home, workshop: Factory, shop: Store };
 const CITIES = ['الجزائر', 'وهران', 'قسنطينة', 'عنابة', 'سطيف', 'بجاية', 'تلمسان', 'البليدة'];
 
+type PhotoItem = { url: string; file?: File };
+
 export function WorkerDashboard() {
-  const { data, addBid, updateJob } = useApp();
+  const { data, addBid, updateJob, saveInspection, saveExecution } = useApp();
+  const { workerId: authWorkerId } = useAuth();
   const showToast = useToast();
-  const [activeWorkerId, setActiveWorkerId] = useState(data.workers[0]?.id ?? '');
+  const [activeWorkerId, setActiveWorkerId] = useState(authWorkerId ?? data.workers[0]?.id ?? '');
   const [cityFilter, setCityFilter] = useState('');
   const [propertyFilter, setPropertyFilter] = useState('');
   const [bidModalJob, setBidModalJob] = useState<Job | null>(null);
@@ -156,10 +161,14 @@ export function WorkerDashboard() {
 
       {bidModalJob && (
         <BidModal job={bidModalJob} workerName={worker?.name ?? ''} onClose={() => setBidModalJob(null)}
-          onSubmit={(earliestInspection, proposedStart, note) => {
-            addBid(bidModalJob.id, { workerId: activeWorkerId, workerName: worker?.name ?? '', earliestInspection, proposedStart, note });
-            showToast('تم تسجيل تقدمك للمعاينة بنجاح', 'success');
-            setBidModalJob(null);
+          onSubmit={async (earliestInspection, proposedStart, note) => {
+            try {
+              await addBid(bidModalJob.id, { workerId: activeWorkerId, workerName: worker?.name ?? '', earliestInspection, proposedStart, note });
+              showToast('تم تسجيل تقدمك للمعاينة بنجاح', 'success');
+              setBidModalJob(null);
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : 'فشل التسجيل', 'error');
+            }
           }} />
       )}
 
@@ -170,12 +179,26 @@ export function WorkerDashboard() {
           workerName={worker?.name ?? ''}
           isEditing={!!inspectionJob.inspection}
           onClose={() => setInspectionJob(null)}
-          onSubmit={(d) => {
-            const newInspection: InspectionData = { ...d, inspectedBy: worker?.name ?? inspectionJob.inspection?.inspectedBy ?? '' };
-            const nextStatus = inspectionJob.status === 'inspecting' ? 'executing' : inspectionJob.status;
-            updateJob(inspectionJob.id, { inspection: newInspection, status: nextStatus });
-            showToast(inspectionJob.inspection ? 'تم تحديث الصور والقياسات بنجاح' : 'تم تسجيل القياسات الميدانية بنجاح', 'success');
-            setInspectionJob(null);
+          onSubmit={async (d) => {
+            try {
+              const newFiles = d.siteVisitPhotos.filter((p) => p.file).map((p) => p.file!);
+              const keepUrls = d.siteVisitPhotos.filter((p) => !p.file).map((p) => p.url);
+              await replaceProjectPhotos(inspectionJob.id, 'site_visit', newFiles, keepUrls);
+              await saveInspection(inspectionJob.id, {
+                verifiedArea: d.verifiedArea,
+                spotlightsCount: d.spotlightsCount,
+                complexity: d.complexity,
+                depositReceived: d.depositReceived,
+                inspectedAt: d.inspectedAt,
+                inspectedBy: worker?.name ?? inspectionJob.inspection?.inspectedBy ?? '',
+              });
+              const nextStatus = inspectionJob.status === 'inspecting' ? 'executing' : inspectionJob.status;
+              await updateJob(inspectionJob.id, { status: nextStatus });
+              showToast(inspectionJob.inspection ? 'تم تحديث الصور والقياسات بنجاح' : 'تم تسجيل القياسات الميدانية بنجاح', 'success');
+              setInspectionJob(null);
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : 'فشل الحفظ', 'error');
+            }
           }}
         />
       )}
@@ -185,10 +208,30 @@ export function WorkerDashboard() {
           key={executionJob.id}
           job={executionJob}
           onClose={() => setExecutionJob(null)}
-          onSubmit={(d) => {
-            updateJob(executionJob.id, { execution: d, status: 'completed' });
-            showToast('تم تصفية العمل بنجاح', 'success');
-            setExecutionJob(null);
+          onSubmit={async (d) => {
+            try {
+              const beforeNew = d.beforePhotos.filter((p) => p.file).map((p) => p.file!);
+              const beforeKeep = d.beforePhotos.filter((p) => !p.file).map((p) => p.url);
+              const afterNew = d.afterPhotos.filter((p) => p.file).map((p) => p.file!);
+              const afterKeep = d.afterPhotos.filter((p) => !p.file).map((p) => p.url);
+              await Promise.all([
+                replaceProjectPhotos(executionJob.id, 'before', beforeNew, beforeKeep),
+                replaceProjectPhotos(executionJob.id, 'after', afterNew, afterKeep),
+              ]);
+              await saveExecution(executionJob.id, {
+                beforePhotos: [],
+                afterPhotos: [],
+                returnMethod: d.returnMethod,
+                finalPaymentReceived: d.finalPaymentReceived,
+                finalMeasurementsConfirmed: d.finalMeasurementsConfirmed,
+                completedAt: d.completedAt,
+              });
+              await updateJob(executionJob.id, { status: 'completed' });
+              showToast('تم تصفية العمل بنجاح', 'success');
+              setExecutionJob(null);
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : 'فشل الحفظ', 'error');
+            }
           }}
         />
       )}
@@ -198,17 +241,20 @@ export function WorkerDashboard() {
 
 function BidModal({ job, workerName, onClose, onSubmit }: {
   job: Job; workerName: string; onClose: () => void;
-  onSubmit: (earliestInspection: string, proposedStart: string, note: string) => void;
+  onSubmit: (earliestInspection: string, proposedStart: string, note: string) => Promise<void>;
 }) {
   const [earliestInspection, setEarliestInspection] = useState('');
   const [proposedStart, setProposedStart] = useState('');
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!earliestInspection || !proposedStart) { setError('الرجاء إدخال تاريخ المعاينة وتاريخ بدء العمل'); return; }
-    onSubmit(earliestInspection, proposedStart, note);
+    setBusy(true);
+    await onSubmit(earliestInspection, proposedStart, note);
+    setBusy(false);
   }
 
   return (
@@ -231,40 +277,44 @@ function BidModal({ job, workerName, onClose, onSubmit }: {
           <textarea className="input-field min-h-[80px] resize-none" placeholder="أي ملاحظات إضافية..." value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
         {error && <p className="text-red-500 text-sm">{error}</p>}
-        <button type="submit" className="btn-primary w-full">تأكيد التقدم</button>
+        <button type="submit" disabled={busy} className="btn-primary w-full disabled:opacity-60 flex items-center justify-center gap-2">
+          {busy ? <Loader2 size={18} className="animate-spin" /> : 'تأكيد التقدم'}
+        </button>
       </form>
     </Modal>
   );
 }
 
-function PhotoUploader({ label, photos, setPhotos, max = 4 }: {
-  label: string; photos: string[]; setPhotos: (v: string[]) => void; max?: number;
+function PhotoUploader({ label, items, setItems, max = 4 }: {
+  label: string; items: PhotoItem[]; setItems: (v: PhotoItem[]) => void; max?: number;
 }) {
   function handleFileUpload(files: FileList | null) {
     if (!files) return;
-    const newUrls = Array.from(files).slice(0, max - photos.length).map((f) => URL.createObjectURL(f));
-    setPhotos([...photos, ...newUrls].slice(0, max));
+    const newItems = Array.from(files)
+      .slice(0, max - items.length)
+      .map((f) => ({ url: URL.createObjectURL(f), file: f }));
+    setItems([...items, ...newItems].slice(0, max));
   }
 
   return (
     <div>
       <label className="label-field flex items-center gap-1.5"><Camera size={15} /> {label}</label>
       <div className="grid grid-cols-4 gap-2 mb-2">
-        {photos.map((url, i) => (
+        {items.map((item, i) => (
           <div key={i} className="relative aspect-square rounded-lg overflow-hidden group">
-            <img src={url} alt={`صورة ${i + 1}`} className="w-full h-full object-cover" />
-            <button type="button" onClick={() => setPhotos(photos.filter((_, idx) => idx !== i))} className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-700">×</button>
+            <img src={item.url} alt={`صورة ${i + 1}`} className="w-full h-full object-cover" />
+            <button type="button" onClick={() => setItems(items.filter((_, idx) => idx !== i))} className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-700">×</button>
           </div>
         ))}
-        {photos.length === 0 && (
+        {items.length === 0 && (
           <div className="col-span-4 aspect-[4/1] flex items-center justify-center text-slate-300 border-2 border-dashed border-slate-200 rounded-xl">
             <ImageOff size={20} className="ml-1.5" /> لا توجد صور بعد
           </div>
         )}
       </div>
-      {photos.length < max && (
+      {items.length < max && (
         <label className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-xl py-3 cursor-pointer hover:border-navy-400 transition-colors text-sm text-slate-500">
-          <Upload size={16} /> رفع صور ({photos.length}/{max})
+          <Upload size={16} /> رفع صور ({items.length}/{max})
           <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
         </label>
       )}
@@ -274,16 +324,19 @@ function PhotoUploader({ label, photos, setPhotos, max = 4 }: {
 
 function InspectionModal({ job, workerName, isEditing, onClose, onSubmit }: {
   job: Job; workerName: string; isEditing: boolean; onClose: () => void;
-  onSubmit: (data: { verifiedArea: number; spotlightsCount: number; complexity: JobComplexity; depositReceived: boolean; inspectedAt: string; siteVisitPhotos: string[] }) => void;
+  onSubmit: (data: { verifiedArea: number; spotlightsCount: number; complexity: JobComplexity; depositReceived: boolean; inspectedAt: string; siteVisitPhotos: PhotoItem[] }) => Promise<void>;
 }) {
   const [verifiedArea, setVerifiedArea] = useState(job.inspection?.verifiedArea?.toString() ?? '');
   const [spotlightsCount, setSpotlightsCount] = useState(job.inspection?.spotlightsCount?.toString() ?? '');
   const [complexity, setComplexity] = useState<JobComplexity>(job.inspection?.complexity ?? 'normal');
   const [depositReceived, setDepositReceived] = useState(job.inspection?.depositReceived ?? false);
-  const [siteVisitPhotos, setSiteVisitPhotos] = useState<string[]>(job.inspection?.siteVisitPhotos ?? []);
+  const [siteVisitPhotos, setSiteVisitPhotos] = useState<PhotoItem[]>(
+    (job.inspection?.siteVisitPhotos ?? []).map((url) => ({ url })),
+  );
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const area = parseFloat(verifiedArea);
     const spots = parseInt(spotlightsCount) || 0;
@@ -291,7 +344,9 @@ function InspectionModal({ job, workerName, isEditing, onClose, onSubmit }: {
     if (spots < 0) { setError('عدد الأضواء لا يمكن أن يكون سالباً'); return; }
     if (siteVisitPhotos.length === 0) { setError('الرجاء رفع صورة واحدة على الأقل للزيارة المبدئية'); return; }
     if (!depositReceived) { setError('يجب تأكيد استلام الدفعة الأولى 50% للمتابعة'); return; }
-    onSubmit({ verifiedArea: area, spotlightsCount: spots, complexity, depositReceived, inspectedAt: job.inspection?.inspectedAt ?? new Date().toISOString(), siteVisitPhotos });
+    setBusy(true);
+    await onSubmit({ verifiedArea: area, spotlightsCount: spots, complexity, depositReceived, inspectedAt: job.inspection?.inspectedAt ?? new Date().toISOString(), siteVisitPhotos });
+    setBusy(false);
   }
 
   return (
@@ -301,7 +356,7 @@ function InspectionModal({ job, workerName, isEditing, onClose, onSubmit }: {
         <p className="text-slate-500">المساحة التقديرية الأولى للعميل: <strong>{job.estimatedArea} م²</strong></p>
       </div>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <PhotoUploader label="صور الزيارة المبدئية للموقع *" photos={siteVisitPhotos} setPhotos={setSiteVisitPhotos} max={6} />
+        <PhotoUploader label="صور الزيارة المبدئية للموقع *" items={siteVisitPhotos} setItems={setSiteVisitPhotos} max={6} />
         <p className="text-xs text-slate-400 -mt-2">ارفع صوراً توثق حالة الموقع قبل بدء العمل (إلزامي)</p>
 
         <div>
@@ -331,7 +386,9 @@ function InspectionModal({ job, workerName, isEditing, onClose, onSubmit }: {
           </label>
         </div>
         {error && <p className="text-red-500 text-sm">{error}</p>}
-        <button type="submit" className="btn-primary w-full">{isEditing ? 'حفظ التعديلات' : 'تأكيد القياسات وقفل الورشة'}</button>
+        <button type="submit" disabled={busy} className="btn-primary w-full disabled:opacity-60 flex items-center justify-center gap-2">
+          {busy ? <Loader2 size={18} className="animate-spin" /> : (isEditing ? 'حفظ التعديلات' : 'تأكيد القياسات وقفل الورشة')}
+        </button>
       </form>
     </Modal>
   );
@@ -339,18 +396,23 @@ function InspectionModal({ job, workerName, isEditing, onClose, onSubmit }: {
 
 function ExecutionModal({ job, onClose, onSubmit }: {
   job: Job; onClose: () => void;
-  onSubmit: (data: ExecutionData) => void;
+  onSubmit: (data: { beforePhotos: PhotoItem[]; afterPhotos: PhotoItem[]; returnMethod: ReturnMethod; finalPaymentReceived: boolean; finalMeasurementsConfirmed: boolean; completedAt: string }) => Promise<void>;
 }) {
-  const [beforePhotos, setBeforePhotos] = useState<string[]>(job.execution?.beforePhotos ?? []);
-  const [afterPhotos, setAfterPhotos] = useState<string[]>(job.execution?.afterPhotos ?? []);
+  const [beforePhotos, setBeforePhotos] = useState<PhotoItem[]>(
+    (job.execution?.beforePhotos ?? []).map((url) => ({ url })),
+  );
+  const [afterPhotos, setAfterPhotos] = useState<PhotoItem[]>(
+    (job.execution?.afterPhotos ?? []).map((url) => ({ url })),
+  );
   const [returnMethod, setReturnMethod] = useState<ReturnMethod | ''>(job.execution?.returnMethod ?? '');
   const [finalPaymentReceived, setFinalPaymentReceived] = useState(job.execution?.finalPaymentReceived ?? false);
   const [finalMeasurementsConfirmed, setFinalMeasurementsConfirmed] = useState(job.execution?.finalMeasurementsConfirmed ?? false);
   const [finalVerifiedArea, setFinalVerifiedArea] = useState(job.inspection?.verifiedArea?.toString() ?? '');
   const [finalSpotlights, setFinalSpotlights] = useState(job.inspection?.spotlightsCount?.toString() ?? '');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (beforePhotos.length === 0 || afterPhotos.length === 0) { setError('الرجاء رفع صور قبل وبعد التنفيذ'); return; }
     if (!returnMethod) { setError('الرجاء اختيار طريقة إرجاع السلع المتبقية'); return; }
@@ -358,20 +420,22 @@ function ExecutionModal({ job, onClose, onSubmit }: {
     if (!finalMeasurementsConfirmed) { setError('يجب تأكيد القياسات النهائية قبل إتمام العمل'); return; }
     const fArea = parseFloat(finalVerifiedArea);
     if (!fArea || fArea <= 0) { setError('الرجاء إدخال المساحة النهائية المؤكدة'); return; }
-    onSubmit({
+    setBusy(true);
+    await onSubmit({
       beforePhotos, afterPhotos,
       returnMethod: returnMethod as ReturnMethod,
       finalPaymentReceived,
       finalMeasurementsConfirmed,
       completedAt: new Date().toISOString(),
     });
+    setBusy(false);
   }
 
   return (
     <Modal open onClose={onClose} title="تصفية نهاية العمل" size="md">
       <form onSubmit={handleSubmit} className="space-y-5">
-        <PhotoUploader label="صور قبل التنفيذ *" photos={beforePhotos} setPhotos={setBeforePhotos} max={4} />
-        <PhotoUploader label="صور بعد التنفيذ *" photos={afterPhotos} setPhotos={setAfterPhotos} max={4} />
+        <PhotoUploader label="صور قبل التنفيذ *" items={beforePhotos} setItems={setBeforePhotos} max={4} />
+        <PhotoUploader label="صور بعد التنفيذ *" items={afterPhotos} setItems={setAfterPhotos} max={4} />
 
         <div className="p-4 bg-navy-50 border border-navy-200 rounded-xl">
           <h4 className="font-bold text-navy-800 mb-3 flex items-center gap-1.5"><ShieldCheck size={16} /> تأكيد القياسات النهائية</h4>
@@ -415,7 +479,9 @@ function ExecutionModal({ job, onClose, onSubmit }: {
         </div>
 
         {error && <p className="text-red-500 text-sm">{error}</p>}
-        <button type="submit" className="btn-primary w-full">تصفية وإغلاق العمل</button>
+        <button type="submit" disabled={busy} className="btn-primary w-full disabled:opacity-60 flex items-center justify-center gap-2">
+          {busy ? <Loader2 size={18} className="animate-spin" /> : 'تصفية وإغلاق العمل'}
+        </button>
       </form>
     </Modal>
   );

@@ -1,7 +1,7 @@
 import { AppProvider } from './context/AppContext';
 import { AuthProvider, useAuth } from './lib/auth';
 import { ToastProvider } from './components/ui/Toast';
-import { Header } from './components/Header';
+import { Header, FullScreenLoader } from './components/Header';
 import { CustomerPortal } from './components/CustomerPortal';
 import { WorkerDashboard } from './components/WorkerDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -10,7 +10,8 @@ import { useHashRoute, navigate } from './lib/router';
 import type { RoutePath } from './lib/router';
 
 function GuardedRoute({ path, children }: { path: Extract<RoutePath, '/worker' | '/admin'>; children: React.ReactNode }) {
-  const { role } = useAuth();
+  const { role, loading } = useAuth();
+  if (loading) return <FullScreenLoader />;
   if (role !== path.slice(1)) {
     return <LoginScreen redirectTo={path} />;
   }
@@ -49,7 +50,6 @@ function AppContent() {
     );
   }
 
-  // /login — redirect to track by default
   navigate('/track');
   return null;
 }

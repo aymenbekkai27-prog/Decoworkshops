@@ -1,5 +1,3 @@
-export type Role = 'customer' | 'worker' | 'admin';
-
 export type PropertyType = 'home' | 'workshop' | 'shop';
 export type JobComplexity = 'simple' | 'normal' | 'high';
 export type JobStatus = 'new' | 'inspecting' | 'executing' | 'completed';

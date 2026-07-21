@@ -43,6 +43,8 @@ export function CustomerPortal() {
   const [successJob, setSuccessJob] = useState<{ trackingCode: string; clientName: string } | null>(null);
   const [trackingInput, setTrackingInput] = useState('');
   const [trackingResult, setTrackingResult] = useState<Job | null | undefined>(undefined);
+  const [trackingBusy, setTrackingBusy] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [activeGallery, setActiveGallery] = useState(0);
 
   function validate(): boolean {
@@ -57,26 +59,40 @@ export function CustomerPortal() {
     return Object.keys(e).length === 0;
   }
 
-  function handleSubmit(ev: React.FormEvent) {
+  async function handleSubmit(ev: React.FormEvent) {
     ev.preventDefault();
     if (!validate()) return;
-    const job = addJob({
-      clientName: form.clientName.trim(),
-      clientPhone: form.clientPhone.trim(),
-      propertyType: form.propertyType,
-      city: form.city,
-      estimatedArea: parseFloat(form.estimatedArea),
-    });
-    setSuccessJob({ trackingCode: job.trackingCode, clientName: form.clientName.trim() });
-    setForm({ clientName: '', clientPhone: '', propertyType: 'home', city: CITIES[0], estimatedArea: '' });
-    showToast('تم تسجيل طلبك بنجاح', 'success');
+    setSubmitting(true);
+    try {
+      const job = await addJob({
+        clientName: form.clientName.trim(),
+        clientPhone: form.clientPhone.trim(),
+        propertyType: form.propertyType,
+        city: form.city,
+        estimatedArea: parseFloat(form.estimatedArea),
+      });
+      setSuccessJob({ trackingCode: job.trackingCode, clientName: form.clientName.trim() });
+      setForm({ clientName: '', clientPhone: '', propertyType: 'home', city: CITIES[0], estimatedArea: '' });
+      showToast('تم تسجيل طلبك بنجاح', 'success');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'حدث خطأ أثناء التسجيل', 'error');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleTrack(ev: React.FormEvent) {
+  async function handleTrack(ev: React.FormEvent) {
     ev.preventDefault();
     if (!trackingInput.trim()) return;
-    const job = getJobByTracking(trackingInput.trim());
-    setTrackingResult(job ?? null);
+    setTrackingBusy(true);
+    try {
+      const job = await getJobByTracking(trackingInput.trim());
+      setTrackingResult(job ?? null);
+    } catch {
+      setTrackingResult(null);
+    } finally {
+      setTrackingBusy(false);
+    }
   }
 
   return (
@@ -195,7 +211,7 @@ export function CustomerPortal() {
                 {errors.estimatedArea && <p className="text-red-500 text-xs mt-1">{errors.estimatedArea}</p>}
               </div>
             </div>
-            <button type="submit" className="btn-primary w-full py-3.5 text-base">تسجيل الطلب</button>
+            <button type="submit" disabled={submitting} className="btn-primary w-full py-3.5 text-base disabled:opacity-60">{submitting ? 'جاري التسجيل...' : 'تسجيل الطلب'}</button>
           </form>
         </div>
       </section>
@@ -211,8 +227,8 @@ export function CustomerPortal() {
               </div>
             </div>
             <form onSubmit={handleTrack} className="flex gap-2">
-              <input className="input-field flex-1" placeholder="مثال: DEC-XXXXXX" value={trackingInput} onChange={(e) => setTrackingInput(e.target.value)} />
-              <button type="submit" className="btn-primary">تتبّع</button>
+              <input className="input-field flex-1" placeholder="مثال: DEC-XXXXXX" value={trackingInput} onChange={(e) => setTrackingInput(e.target.value)} disabled={trackingBusy} />
+              <button type="submit" className="btn-primary" disabled={trackingBusy}>{trackingBusy ? '...' : 'تتبّع'}</button>
             </form>
             {trackingResult === null && (
               <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 font-semibold">لم يتم العثور على طلب بهذا الرمز. يرجى التحقق والمحاولة مرة أخرى.</div>
