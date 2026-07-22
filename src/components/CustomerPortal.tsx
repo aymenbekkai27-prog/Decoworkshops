@@ -214,7 +214,7 @@ export function CustomerPortal() {
                 {errors.estimatedArea && <p className="text-red-500 text-xs mt-1">{errors.estimatedArea}</p>}
               </div>
             </div>
-            <button type="submit" disabled={submitting} className="btn-primary w-full py-3.5 text-base disabled:opacity-60">{submitting ? 'جاري التسجيل...' : 'تسجيل الطلب'}</button>
+            <button type="submit" disabled={submitting} onClick={() => alert('Clicked!')} className="btn-primary w-full py-3.5 text-base disabled:opacity-60">{submitting ? 'جاري التسجيل...' : 'تسجيل الطلب'}</button>
           </form>
         </div>
       </section>
