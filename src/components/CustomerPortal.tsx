@@ -76,6 +76,7 @@ export function CustomerPortal() {
       showToast('تم تسجيل طلبك بنجاح', 'success');
     } catch (e) {
       console.error('[CustomerPortal] addJob failed:', e);
+      alert(JSON.stringify(e));
       showToast(e instanceof Error ? e.message : 'حدث خطأ أثناء التسجيل', 'error');
     } finally {
       setSubmitting(false);
