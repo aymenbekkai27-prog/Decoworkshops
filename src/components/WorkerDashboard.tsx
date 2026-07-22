@@ -253,8 +253,13 @@ function BidModal({ job, workerName, onClose, onSubmit }: {
     e.preventDefault();
     if (!earliestInspection || !proposedStart) { setError('الرجاء إدخال تاريخ المعاينة وتاريخ بدء العمل'); return; }
     setBusy(true);
-    await onSubmit(earliestInspection, proposedStart, note);
-    setBusy(false);
+    try {
+      await onSubmit(earliestInspection, proposedStart, note);
+    } catch {
+      // parent shows toast
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -345,8 +350,13 @@ function InspectionModal({ job, workerName, isEditing, onClose, onSubmit }: {
     if (siteVisitPhotos.length === 0) { setError('الرجاء رفع صورة واحدة على الأقل للزيارة المبدئية'); return; }
     if (!depositReceived) { setError('يجب تأكيد استلام الدفعة الأولى 50% للمتابعة'); return; }
     setBusy(true);
-    await onSubmit({ verifiedArea: area, spotlightsCount: spots, complexity, depositReceived, inspectedAt: job.inspection?.inspectedAt ?? new Date().toISOString(), siteVisitPhotos });
-    setBusy(false);
+    try {
+      await onSubmit({ verifiedArea: area, spotlightsCount: spots, complexity, depositReceived, inspectedAt: job.inspection?.inspectedAt ?? new Date().toISOString(), siteVisitPhotos });
+    } catch {
+      // parent shows toast
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -421,14 +431,19 @@ function ExecutionModal({ job, onClose, onSubmit }: {
     const fArea = parseFloat(finalVerifiedArea);
     if (!fArea || fArea <= 0) { setError('الرجاء إدخال المساحة النهائية المؤكدة'); return; }
     setBusy(true);
-    await onSubmit({
-      beforePhotos, afterPhotos,
-      returnMethod: returnMethod as ReturnMethod,
-      finalPaymentReceived,
-      finalMeasurementsConfirmed,
-      completedAt: new Date().toISOString(),
-    });
-    setBusy(false);
+    try {
+      await onSubmit({
+        beforePhotos, afterPhotos,
+        returnMethod: returnMethod as ReturnMethod,
+        finalPaymentReceived,
+        finalMeasurementsConfirmed,
+        completedAt: new Date().toISOString(),
+      });
+    } catch {
+      // parent shows toast
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
