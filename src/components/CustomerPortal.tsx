@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Sparkles, Phone, Home, Factory, Store, Ruler, CheckCircle2, Search,
-  Palette, Layers, Lightbulb, ShieldCheck, Clock, Award, ArrowLeft,
+  Palette, Layers, Lightbulb, ShieldCheck, Clock, Award, ArrowLeft, Loader2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useToast } from './ui/Toast';
@@ -76,6 +76,8 @@ export function CustomerPortal() {
       showToast('تم تسجيل طلبك بنجاح', 'success');
     } catch (e) {
       console.error('[CustomerPortal] addJob failed:', e);
+      const msg = e instanceof Error ? e.message : String(e);
+      alert('Supabase Insert Error: ' + msg);
       showToast(e instanceof Error ? e.message : 'حدث خطأ أثناء التسجيل', 'error');
     } finally {
       setSubmitting(false);
@@ -213,7 +215,10 @@ export function CustomerPortal() {
                 {errors.estimatedArea && <p className="text-red-500 text-xs mt-1">{errors.estimatedArea}</p>}
               </div>
             </div>
-            <button type="submit" disabled={submitting} className="btn-primary w-full py-3.5 text-base disabled:opacity-60">{submitting ? 'جاري التسجيل...' : 'تسجيل الطلب'}</button>
+            <button type="submit" disabled={submitting} className="btn-primary w-full py-3.5 text-base disabled:opacity-60 flex items-center justify-center gap-2">
+              {submitting && <Loader2 size={20} className="animate-spin" />}
+              {submitting ? 'جاري التسجيل...' : 'تسجيل الطلب'}
+            </button>
           </form>
         </div>
       </section>

@@ -217,23 +217,23 @@ export async function createProject(input: {
   };
   console.log('[storage] createProject inserting:', insertPayload);
 
-  // Insert with a plain .select() (no nested relations) — nested selects
-  // right after an INSERT can fail in postgREST's schema cache.
-  const { data, error } = await supabase
-    .from('projects')
-    .insert(insertPayload)
-    .select('*')
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .insert(insertPayload)
+      .select('*')
+      .single();
 
-  if (error) {
-    logError('createProject.insert', error);
-    throw error;
+    if (error) {
+      logError('createProject.insert', error);
+      throw error;
+    }
+    console.log('[storage] createProject success:', data);
+    return mapJob(data as ProjectRow);
+  } catch (e) {
+    logError('createProject', e);
+    throw e;
   }
-  console.log('[storage] createProject success:', data);
-
-  // A freshly-created project has no bids/photos/measurements yet, so
-  // mapJob with empty arrays is correct.
-  return mapJob(data as ProjectRow);
 }
 
 export async function updateProject(id: string, patch: Partial<Job>): Promise<void> {
